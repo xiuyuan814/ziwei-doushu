@@ -2,25 +2,23 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { chart, question, customPrompt, dimension } = body;
-
+    const rawBody = await req.json();
+    
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { error: '环境变量中未配置 DEEPSEEK_API_KEY' },
-        { status: 500 }
-      );
+      return NextResponse.json({ 
+        error: 'DEEPSEEK_API_KEY 未配置，请在 Vercel 环境变量中添加',
+        success: false 
+      }, { status: 500 });
     }
 
-    const userInstruction = question || customPrompt || dimension || '请综合命盘做基础分析';
+    // 无论前端传过来的字段叫 prompt、question、content 还是 dimension，统统抓取
+    const promptText = rawBody.prompt || rawBody.question || rawBody.dimension || rawBody.content || '请根据命盘进行详细解读分析';
+    const chartData = rawBody.chart || rawBody.data || rawBody;
 
-    const fullMessage = `【命盘数据】：
-${JSON.stringify(chart, null, 2)}
+    const fullMessage = `【命盘排盘数据】：\n${typeof chartData === 'object' ? JSON.stringify(chartData, null, 2) : chartData}\n\n【用户提问/分析维度】：\n${promptText}`;
 
-【用户要求与提问】：
-${userInstruction}`;
-
+    // 调用 DeepSeek 官方 API
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
@@ -30,7 +28,7 @@ ${userInstruction}`;
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages: [
-          { role: 'system', content: '你是一位精通紫微斗数的命理解析助手，请依据用户命盘和具体提问要求进行详细解读。' },
+          { role: 'system', content: '你是一位精通倪海厦《天纪》体系的紫微斗数命理大师，请根据命盘客观详尽地解答。' },
           { role: 'user', content: fullMessage },
         ],
         stream: false,
@@ -39,25 +37,26 @@ ${userInstruction}`;
 
     if (!response.ok) {
       const errDetail = await response.text();
-      return NextResponse.json(
-        { error: `模型调用失败: ${errDetail}` },
-        { status: response.status }
-      );
+      return NextResponse.json({ error: `DeepSeek 返回错误: ${errDetail}`, success: false }, { status: response.status });
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '未能生成解读内容';
+    const resJson = await response.json();
+    const reply = resJson.choices?.[0]?.message?.content || '未能生成解读';
 
+    // 把前端可能读取的所有常见字段名全部塞满返回，彻底避免前端拿不到字段
     return NextResponse.json({
       success: true,
-      data: content,
-      content: content,
-      result: content,
+      text: reply,
+      content: reply,
+      result: reply,
+      data: reply,
+      interpretation: reply,
+      message: reply
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error?.message || '服务端异常' },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    return NextResponse.json({ 
+      error: err?.message || '服务器解析异常',
+      success: false 
+    }, { status: 500 });
   }
 }
